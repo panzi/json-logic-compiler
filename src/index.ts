@@ -84,9 +84,11 @@ const KEYWORDS = new Set<string>([
 
 const RESERVED_NAMES = new Set<string>([
     ...KEYWORDS,
-    'arg', 'item', 'accumulator', 'context', 'missing', 'key', 'current', 'data', 'index',
-    'resolve', 'log', 'substr', 'truthy',
-    'Array', 'Object', 'Math', 'console',
+    'arg', 'item', 'accumulator', 'context', 'key', 'current', 'data', 'index',
+    'resolve', 'truthy',
+    'hasOwnProperty', 'Array', 'Object', 'Math', 'console',
+
+    // log, substr, missing, and missing_some aren't here, because they are operators that are allowed to be overlaoded.
 ]);
 
 function isSafeName(name: string): boolean {
@@ -103,6 +105,8 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
     let needLog = false;
     let needSubstr = false;
     let needTruthy = false;
+    let needHasOwnProperty = false;
+    let needsMissingSome = false;
 
     function commaList(logic: RulesLogic[], varName: string) {
         if (logic.length > 0) {
@@ -222,16 +226,24 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'missing':
+                needHasOwnProperty = true;
                 buffer.push('Object.keys([');
                 commaList(args, varName);
                 buffer.push(
-                    '].reduce((missing, key) => { if (!Object.prototype.hasOwnProperty.call(',
+                    '].reduce((accumulator, key) => { if (!hasOwnProperty.call(',
                     varName,
-                    ', key)) { missing[key] = true; } return missing; }, {}))');
+                    ', key)) { accumulator[key] = true; } return accumulator; }, {}))');
                 break;
 
             case 'missing_some':
-                throw new Error(`${key} is not implemented`);
+                needsMissingSome = true;
+                const minKeys = args[0] ?? 0;
+                const keys = args[1] ?? [];
+                buffer.push('missing_some(', varName, ', ');
+                compile(minKeys, varName);
+                buffer.push(', ');
+                compile(keys, varName);
+                buffer.push(')');
                 break;
 
             case 'if':
@@ -575,7 +587,29 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
         buffer.unshift('function truthy(value) { return Array.isArray(value) ? value.length !== 0 : !!value; }\n')
     }
 
+    if (needsMissingSome) {
+        buffer.unshift(String(missing_some) + '\n');
+    }
+
+    if (needHasOwnProperty || needsMissingSome) {
+        buffer.unshift('const hasOwnProperty = Object.hasOwnProperty;\n');
+    }
+
     return [buffer.join(''), usedOperations];
+}
+
+const hasOwnProperty = Object.hasOwnProperty;
+
+function missing_some(obj, count, keys) {
+    var missingMap = {};
+    for (var index = 0; index < keys.length; ++ index) {
+        var key = keys[index];
+        if (!hasOwnProperty.call(obj, key)) {
+            missingMap[key] = true;
+        }
+    }
+    var missing = Object.keys(missingMap);
+    return missing.length >= count ? missing : [];
 }
 
 function resolve(obj, prop, defaultValue) {
