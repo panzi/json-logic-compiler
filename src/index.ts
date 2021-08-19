@@ -86,7 +86,7 @@ const RESERVED_NAMES = new Set<string>([
     ...KEYWORDS,
     'arg', 'item', 'accumulator', 'context', 'missing', 'key', 'current', 'data', 'index',
     'resolve', 'log', 'substr', 'truthy',
-    'Array', 'Object', 'console',
+    'Array', 'Object', 'Math', 'console',
 ]);
 
 function isSafeName(name: string): boolean {
