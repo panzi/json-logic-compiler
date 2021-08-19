@@ -107,7 +107,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
     function commaList(logic: RulesLogic[], varName: string) {
         if (logic.length > 0) {
             compile(logic[0], varName);
-            for (let index = 0; index < logic.length; ++ index) {
+            for (let index = 1; index < logic.length; ++ index) {
                 buffer.push(', ');
                 compile(logic[index], varName);
             }
@@ -139,16 +139,12 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             throw new TypeError(`illegal logic expression: ${JSON.stringify(logic, null, 4)}`);
         }
 
-        const args = logic[key];
+        const args: any[] = Array.isArray(logic[key]) ? logic[key] : [logic[key]];
 
         if (key in safeNames) {
             const name = safeNames[key];
             buffer.push(name, '(');
-            if (Array.isArray(args)) {
-                commaList(args, varName);
-            } else {
-                compile(args, varName);
-            }
+            commaList(args, varName);
             buffer.push(')');
             return;
         }
@@ -177,26 +173,15 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             usedOperations[safeName] = operations[key];
 
             buffer.push(safeName, '(');
-            if (Array.isArray(args)) {
-                commaList(args, varName);
-            } else {
-                compile(args, varName);
-            }
+            commaList(args, varName);
             buffer.push(')');
             return;
         }
 
         switch (key) {
             case 'var':
-                let prop: RulesLogic|undefined;
-                let defaultValue: RulesLogic|undefined;
-
-                if (Array.isArray(args)) {
-                    prop = args[0];
-                    defaultValue = args[1];
-                } else {
-                    prop = args;
-                }
+                const prop: RulesLogic|undefined = args[0];
+                const defaultValue: RulesLogic|undefined = args[1];
 
                 if (prop === undefined || prop === null || prop === '') {
                     buffer.push(varName);
@@ -237,9 +222,8 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'missing':
-                const items = Array.isArray(args) ? args : [args];
                 buffer.push('Object.keys([');
-                commaList(items, varName);
+                commaList(args, varName);
                 buffer.push(
                     '].reduce((missing, key) => { if (!Object.prototype.hasOwnProperty.call(',
                     varName,
@@ -252,7 +236,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
 
             case 'if':
             case '?:':
-                if (!Array.isArray(args) || args.length === 0) {
+                if (args.length === 0) {
                     buffer.push('null');
                 } else {
                     buffer.push('(');
@@ -280,7 +264,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             case '!=':
             case '!==':
                 // TODO: operator precedence logic
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('(');
@@ -293,22 +277,15 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             case '!':
             case '!!':
                 buffer.push(key);
-                if (Array.isArray(args)) {
-                    if (args.length !== 1) {
-                        throw new TypeError(`illegal logic expression, ${key} needs exactly 1 argument: ${JSON.stringify(logic, null, 4)}`);
-                    }
-                    compile(args[0], varName);
-                } else {
-                    compile(args, varName);
+                if (args.length !== 1) {
+                    throw new TypeError(`illegal logic expression, ${key} needs exactly 1 argument: ${JSON.stringify(logic, null, 4)}`);
                 }
+                compile(args[0], varName);
                 break;
 
             case 'or':
             case 'and':
-                if (!Array.isArray(args)) {
-                    compile(args, varName);
-                    return;
-                } else if (args.length === 0) {
+                if (args.length === 0) {
                     buffer.push('undefined');
                     return;
                 }
@@ -326,7 +303,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             case '>=':
             case '<':
             case '<=':
-                if (!Array.isArray(args) || args.length < 2) {
+                if (args.length < 2) {
                     buffer.push('false');
                 }
                 buffer.push('(');
@@ -345,19 +322,12 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             case 'max':
             case 'min':
                 buffer.push('Math.', key, '(');
-                if (Array.isArray(args)) {
-                    commaList(args, varName);
-                } else {
-                    compile(args, varName);
-                }
+                commaList(args, varName);
                 buffer.push(')');
                 break;
 
             case '+':
-                if (!Array.isArray(args)) {
-                    buffer.push('+');
-                    compile(args, varName);
-                } else if (args.length === 0) {
+                if (args.length === 0) {
                     throw new TypeError(`illegal logic expression, ${key} needs 1 or more arguments: ${JSON.stringify(logic, null, 4)}`);
                 } else if (args.length === 1) {
                     buffer.push('+');
@@ -372,12 +342,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     buffer.push(')');
                 }
                 break;
-                
+
             case '-':
-                if (!Array.isArray(args)) {
-                    buffer.push('-');
-                    compile(args, varName);
-                } else if (args.length === 0 || args.length > 2) {
+                if (args.length === 0 || args.length > 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs 1 or 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 } else if (args.length === 1) {
                     buffer.push('-');
@@ -390,9 +357,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     buffer.push(')');
                 }
                 break;
-            
+
             case '*':
-                if (!Array.isArray(args) || args.length < 2) {
+                if (args.length < 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs 2 or more arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('(');
@@ -403,10 +370,10 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 }
                 buffer.push(')');
                 break;
-        
+
             case '%':
             case '/':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('(');
@@ -417,9 +384,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 }
                 buffer.push(')');
                 break;
-            
+
             case 'map':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('(');
@@ -428,9 +395,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 compile(args[1], 'item');
                 buffer.push(') ?? [])');
                 break;
-        
+
             case 'reduce':
-                if (!Array.isArray(args) || args.length < 2 || args.length > 3) {
+                if (args.length < 2 || args.length > 3) {
                     throw new TypeError(`illegal logic expression, ${key} needs 2 to 3 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 compile(args[0], varName);
@@ -447,7 +414,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'filter':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('(');
@@ -465,7 +432,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'all':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 compile(args[0], varName);
@@ -482,7 +449,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'none':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('!');
@@ -500,7 +467,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'some':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 compile(args[0], varName);
@@ -517,7 +484,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'merge':
-                if (!Array.isArray(args) || args.length === 0) {
+                if (args.length === 0) {
                     buffer.push('[]');
                 } else {
                     buffer.push('(');
@@ -529,7 +496,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'in':
-                if (!Array.isArray(args) || args.length !== 2) {
+                if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 compile(args[1], varName);
@@ -539,19 +506,21 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'cat':
-                if (Array.isArray(args)) {
+                if (args.length === 0) {
+                    buffer.push("''");
+                } else if (args.length === 1) {
+                    buffer.push('String(');
+                    compile(args[0], varName);
+                    buffer.push(')');
+                } else {
                     buffer.push('[');
                     commaList(args, varName);
                     buffer.push('].join("")');
-                } else {
-                    buffer.push('String(');
-                    compile(args, varName);
-                    buffer.push(')');
                 }
                 break;
 
             case 'substr':
-                if (!Array.isArray(args) || args.length < 2 || args.length > 3) {
+                if (args.length < 2 || args.length > 3) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 if (args.length > 2) {
@@ -570,21 +539,17 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     buffer.push(')');
                 }
                 break;
-        
+
             case 'log':
                 needLog = true;
                 buffer.push('log(');
-                if (Array.isArray(args)) {
-                    if (args.length !== 1) {
-                        throw new TypeError(`illegal logic expression, ${key} needs exactly 1 argument: ${JSON.stringify(logic, null, 4)}`);
-                    }
-                    compile(args[0], varName);
-                } else {
-                    compile(args, varName);
+                if (args.length !== 1) {
+                    throw new TypeError(`illegal logic expression, ${key} needs exactly 1 argument: ${JSON.stringify(logic, null, 4)}`);
                 }
+                compile(args[0], varName);
                 buffer.push(')');
                 break;
-    
+
             default:
                 throw new TypeError(`illegal logic expression: ${JSON.stringify(logic, null, 4)}`);
         }
@@ -592,7 +557,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
 
     compile(logic, 'arg');
 
-    buffer.push(';\n');
+    buffer.push(';');
 
     if (needLog) {
         buffer.unshift('function log(value) { console.log(value); return value; }\n');
@@ -783,22 +748,22 @@ const options: Options = {
             if (value instanceof Date) {
                 return value.getTime();
             }
-        
+
             const typeStr = typeof value;
             if (typeStr === 'string') {
                 return new Date(value).getTime();
             }
-        
+
             if (typeStr === 'number') {
                 return value;
             }
-        
+
             const typeMsg = value === null       ? 'null' :
                             typeStr === 'object' ? value.constructor.name :
                             typeStr;
             throw new TypeError(`value is not a Date object but ${typeMsg}`);
         },
-        
+
         days: (value: number) => +value * 1000 * 60 * 60 * 24,
         hours: (value: number) => +value * 1000 * 60 * 60,
         now: Date.now,
@@ -817,29 +782,29 @@ const options: Options = {
             if (value instanceof Date) {
                 return Date.now() - value.getTime();
             }
-        
+
             const typeStr = typeof value;
             if (typeStr === 'string') {
                 return Date.now() - new Date(value).getTime();
             }
-        
+
             if (typeStr === 'number') {
                 return Date.now() - value;
             }
-        
+
             const typeMsg = value === null       ? 'null' :
                             typeStr === 'object' ? value.constructor.name :
                             typeStr;
             throw new TypeError(`value is not a Date object but ${typeMsg}`);
         },
-        
+
         combinations(...lists: readonly any[][]): any[][] {
             const combinations: any[][] = [];
             const listCount = lists.length;
             const stack: number[] = new Array(listCount);
             const item: any[] = new Array(listCount);
             let stackPtr = 0;
-        
+
             stack[0] = 0;
             while (stackPtr >= 0) {
                 if (stackPtr === listCount) {
@@ -848,7 +813,7 @@ const options: Options = {
                 } else {
                     const list  = lists[stackPtr];
                     const index = stack[stackPtr];
-        
+
                     if (index === list.length) {
                         -- stackPtr;
                     } else {
@@ -859,14 +824,14 @@ const options: Options = {
                     }
                 }
             }
-        
+
             return combinations;
         },
-        
+
         zip(...lists: readonly any[][]): any[][] {
             const zipped: any[][] = [];
             const listCount = lists.length;
-        
+
             if (listCount > 0) {
                 let itemCount = Infinity;
                 for (const list of lists) {
@@ -874,7 +839,7 @@ const options: Options = {
                         itemCount = list.length;
                     }
                 }
-        
+
                 for (let listIndex = 0; listIndex < itemCount; ++ listIndex) {
                     const item = new Array(listCount);
                     for (let tupleIndex = 0; tupleIndex < listCount; ++ tupleIndex) {
@@ -883,12 +848,37 @@ const options: Options = {
                     zipped.push(item);
                 }
             }
-        
+
             return zipped;
         },
+
+        E:       () => Math.E,
+        LN10:    () => Math.LN10,
+        LN2:     () => Math.LN2,
+        LOG2E:   () => Math.LOG2E,
+        LOG10E:  () => Math.LOG10E,
+        PI:      () => Math.PI,
+        SQRT1_2: () => Math.SQRT1_2,
+        SQRT2:   () => Math.SQRT2,
+
+        abs:       Math.abs,
+        acos:      Math.acos,
+        asin:      Math.asin,
+        atan:      Math.atan,
+        atan2:     Math.atan2,
+        ceil:      Math.ceil,
+        cos:       Math.cos,
+        exp:       Math.exp,
+        floor:     Math.floor,
+        logarthim: Math.log, // log() is console.log()
+        pow:       Math.pow,
+        round:     Math.round,
+        sin:       Math.sin,
+        sqrt:      Math.sqrt,
+        tan:       Math.tan,
     }
 }
-console.log(`function (arg) {\n    ${compileToString(rules as any, options)[0].replace(/\n/g, '\n    ')}}`);
+console.log(`function (arg) {\n    ${compileToString(rules as any, options)[0].replace(/\n/g, '\n    ')}\n}`);
 
 console.log(compileToFunction(logic)({
     foo: 1,
