@@ -1,0 +1,6 @@
+/build
+/tmp
+node_modules
+.*
+!.gitignore
+/package-lock.json
