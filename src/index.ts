@@ -602,7 +602,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             default:
-                throw new TypeError(`illegal logic expression: ${JSON.stringify(logic, null, 4)}`);
+                throw new TypeError(`Unrecognized operation: ${JSON.stringify(key)}`);
         }
     }
 
@@ -760,7 +760,7 @@ function isEmpty(ops: {[key: string]: any}): boolean {
     return true;
 }
 
-export function compileStringToFunction(code: string, usedOperations: Operations): (arg: any) => any {
+export function compileStringToFunction(code: string, usedOperations: Operations): (arg?: any) => any {
     if (isEmpty(usedOperations)) {
         return new Function('arg', code) as any;
     }
@@ -778,7 +778,7 @@ export function compileStringToFunction(code: string, usedOperations: Operations
     return wrapper(...args);
 }
 
-export function compileToFunction(logic: RulesLogic, options?: Options): (arg: any) => any {
+export function compileToFunction(logic: RulesLogic, options?: Options): (arg?: any) => any {
     const [code, usedOperations] = compileToString(logic, options);
     return compileStringToFunction(code, usedOperations);
 }
