@@ -86,7 +86,7 @@ const RESERVED_NAMES = new Set<string>([
     ...KEYWORDS,
     'arg', 'item', 'accumulator', 'context', 'key', 'current', 'data', 'index',
     'resolve', 'truthy',
-    'hasOwnProperty', 'Array', 'Object', 'Math', 'console',
+    'hasOwnProperty', 'String', 'Array', 'Object', 'Math', 'console',
 
     // log, substr, missing, and missing_some aren't here, because they are operators that are allowed to be overlaoded.
 ]);
@@ -115,6 +115,17 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 buffer.push(', ');
                 compile(logic[index], varName);
             }
+        }
+    }
+
+    function compileBool(logic: RulesLogic, varName: string) {
+        if (mayNeedTruthy(logic)) {
+            needTruthy = true;
+            buffer.push('truthy(');
+            compile(logic, varName);
+            buffer.push(')');
+        } else {
+            compile(logic, varName);
         }
     }
 
@@ -257,7 +268,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                             buffer.push('null');
                             break;
                         }
-                        compile(args[index ++], varName);
+                        compileBool(args[index ++], varName);
                         buffer.push(' ? ');
                         compile(args[index ++], varName);
                         buffer.push(' : ');
@@ -292,7 +303,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length !== 1) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 1 argument: ${JSON.stringify(logic, null, 4)}`);
                 }
-                compile(args[0], varName);
+                compileBool(args[0], varName);
                 break;
 
             case 'or':
@@ -303,10 +314,10 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 }
                 const op = key == 'or' ? ' || ' : ' && ';
                 buffer.push('(');
-                compile(args[0], varName);
+                compileBool(args[0], varName);
                 for (let index = 1; index < args.length; ++ index) {
                     buffer.push(op);
-                    compile(args[index], varName);
+                    compileBool(args[index], varName);
                 }
                 buffer.push(')');
                 break;
@@ -342,13 +353,21 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length === 0) {
                     throw new TypeError(`illegal logic expression, ${key} needs 1 or more arguments: ${JSON.stringify(logic, null, 4)}`);
                 } else if (args.length === 1) {
-                    buffer.push('+');
+                    if (!isNumber(args[0])) {
+                        buffer.push('+');
+                    }
                     compile(args[0], varName);
                 } else {
                     buffer.push('(');
+                    if (!isNumber(args[0])) {
+                        buffer.push('+');
+                    }
                     compile(args[0], varName);
                     for (let index = 1; index < args.length; ++ index) {
                         buffer.push(' + ');
+                        if (!isNumber(args[index])) {
+                            buffer.push('+');
+                        }
                         compile(args[index], varName);
                     }
                     buffer.push(')');
@@ -371,16 +390,22 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case '*':
-                if (args.length < 2) {
-                    throw new TypeError(`illegal logic expression, ${key} needs 2 or more arguments: ${JSON.stringify(logic, null, 4)}`);
+                if (args.length === 0) {
+                    throw new TypeError(`illegal logic expression, ${key} needs at least 1 argument: ${JSON.stringify(logic, null, 4)}`);
+                } else if (args.length === 1) {
+                    if (!isNumber(args[0])) {
+                        buffer.push('+');
+                    }
+                    compile(args[0], varName);
+                } else {
+                    buffer.push('(');
+                    compile(args[0], varName);
+                    for (let index = 1; index < args.length; ++ index) {
+                        buffer.push(' * ');
+                        compile(args[index], varName);
+                    }
+                    buffer.push(')');
                 }
-                buffer.push('(');
-                compile(args[0], varName);
-                for (let index = 1; index < args.length; ++ index) {
-                    buffer.push(' * ');
-                    compile(args[index], varName);
-                }
-                buffer.push(')');
                 break;
 
             case '%':
@@ -432,14 +457,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 buffer.push('(');
                 compile(args[0], varName);
                 buffer.push(arrayMethod(args[0], 'filter'), '(item => ');
-                if (mayNeedTruthy(args[1])) {
-                    needTruthy = true;
-                    buffer.push('truthy(');
-                    compile(args[1], 'item');
-                    buffer.push(')');
-                } else {
-                    compile(args[1], 'item');
-                }
+                compileBool(args[1], 'item');
                 buffer.push(') ?? [])');
                 break;
 
@@ -449,14 +467,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 }
                 compile(args[0], varName);
                 buffer.push(arrayMethod(args[0], 'every'), '(item => ');
-                if (mayNeedTruthy(args[1])) {
-                    needTruthy = true;
-                    buffer.push('truthy(');
-                    compile(args[1], 'item');
-                    buffer.push(')');
-                } else {
-                    compile(args[1], 'item');
-                }
+                compileBool(args[1], 'item');
                 buffer.push(')');
                 break;
 
@@ -467,14 +478,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 buffer.push('!');
                 compile(args[0], varName);
                 buffer.push(arrayMethod(args[0], 'every'), '(item => ');
-                if (mayNeedTruthy(args[1])) {
-                    needTruthy = true;
-                    buffer.push('truthy(');
-                    compile(args[1], 'item');
-                    buffer.push(')');
-                } else {
-                    compile(args[1], 'item');
-                }
+                compileBool(args[1], 'item');
                 buffer.push(')');
                 break;
 
@@ -484,14 +488,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 }
                 compile(args[0], varName);
                 buffer.push(arrayMethod(args[0], 'some'), '(item => ');
-                if (mayNeedTruthy(args[1])) {
-                    needTruthy = true;
-                    buffer.push('truthy(');
-                    compile(args[1], 'item');
-                    buffer.push(')');
-                } else {
-                    compile(args[1], 'item');
-                }
+                compileBool(args[1], 'item');
                 buffer.push(')')
                 break;
 
@@ -512,9 +509,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 compile(args[1], varName);
-                buffer.push(arrayMethod(args[1], 'contains'), '(');
+                buffer.push(arrayMethod(args[1], 'includes'), '(');
                 compile(args[0], varName);
-                buffer.push(') ?? null');
+                buffer.push(')');
                 break;
 
             case 'cat':
@@ -527,7 +524,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 } else {
                     buffer.push('[');
                     commaList(args, varName);
-                    buffer.push('].join("")');
+                    buffer.push("].join('')");
                 }
                 break;
 
@@ -535,21 +532,10 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length < 2 || args.length > 3) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                if (args.length > 2) {
-                    needSubstr = true;
-                    buffer.push('substr(');
-                    compile(args[0], varName);
-                    buffer.push(', ');
-                    compile(args[1], varName);
-                    buffer.push(', ');
-                    compile(args[2], varName);
-                    buffer.push(')');
-                } else {
-                    compile(args[0], varName);
-                    buffer.push('?.substr?.(');
-                    compile(args[1], varName);
-                    buffer.push(')');
-                }
+                needSubstr = true;
+                buffer.push('substr(');
+                commaList(args, varName);
+                buffer.push(')');
                 break;
 
             case 'log':
@@ -580,7 +566,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
     }
 
     if (needSubstr) {
-        buffer.unshift('function substr(str, start, end) { return end < 0 ? str?.substr?.(start, str.length - end) : str?.substr?.(start, end)}\n')
+        buffer.unshift(String(substr) + '\n')
     }
 
     if (needTruthy) {
@@ -596,6 +582,15 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
     }
 
     return [buffer.join(''), usedOperations];
+}
+
+function substr(source, start, end) {
+    if (end < 0) {
+        // JavaScript doesn't support negative end, this emulates PHP behavior
+        var temp = String(source).substr(start);
+        return temp.substr(0, temp.length + end);
+    }
+    return String(source).substr(start, end);
 }
 
 const hasOwnProperty = Object.hasOwnProperty;
@@ -716,8 +711,6 @@ function mayNeedTruthy(logic: RulesLogic): boolean {
         case '!=':
         case '===':
         case '!==':
-        case 'and':
-        case 'or':
         case '!':
         case '!!':
         case 'cat':
@@ -735,6 +728,33 @@ function mayNeedTruthy(logic: RulesLogic): boolean {
     }
 
     return true;
+}
+
+function isNumber(logic: RulesLogic): boolean {
+    if (typeof logic === 'number') {
+        return true;
+    }
+
+    if (isPrimitive(logic)) {
+        return false;
+    }
+
+    const key = getOp(logic);
+
+    if (key === null) {
+        return false;
+    }
+
+    switch (key) {
+        case '+':
+        case '-':
+        case '*':
+        case '/':
+        case '%':
+            return true;
+    }
+
+    return false;
 }
 
 function arrayMethod(arg: RulesLogic, method: string): string {
@@ -772,152 +792,137 @@ function isArray(logic: RulesLogic): boolean {
     return false;
 }
 
-import * as fs from 'fs';
-const rules = JSON.parse(fs.readFileSync(`${__dirname}/../tmp/rules.json`, 'utf8'));
+export const EXTRA_OPERATIONS: Operations = {
+    timestamp(value: any) {
+        if (value instanceof Date) {
+            return value.getTime();
+        }
 
-const logic = {"*": [{"var": "foo"}, {"var": "bar.x"}]};
-const options: Options = {
-    operations: {
-        timestamp(value: any) {
-            if (value instanceof Date) {
-                return value.getTime();
-            }
+        const typeStr = typeof value;
+        if (typeStr === 'string') {
+            return new Date(value).getTime();
+        }
 
-            const typeStr = typeof value;
-            if (typeStr === 'string') {
-                return new Date(value).getTime();
-            }
+        if (typeStr === 'number') {
+            return value;
+        }
 
-            if (typeStr === 'number') {
-                return value;
-            }
+        const typeMsg = value === null       ? 'null' :
+                        typeStr === 'object' ? value.constructor.name :
+                        typeStr;
+        throw new TypeError(`value is not a Date object but ${typeMsg}`);
+    },
 
-            const typeMsg = value === null       ? 'null' :
-                            typeStr === 'object' ? value.constructor.name :
-                            typeStr;
-            throw new TypeError(`value is not a Date object but ${typeMsg}`);
-        },
+    days: (value: number) => +value * 1000 * 60 * 60 * 24,
+    hours: (value: number) => +value * 1000 * 60 * 60,
+    now: Date.now,
 
-        days: (value: number) => +value * 1000 * 60 * 60 * 24,
-        hours: (value: number) => +value * 1000 * 60 * 60,
-        now: Date.now,
+    'is-nan': isNaN,
+    'is-array': Array.isArray,
+    'is-finite': isFinite,
+    'is-empty': isEmpty,
+    'typeof': (value: any) => typeof value,
 
-        'is-nan': isNaN,
-        'is-array': Array.isArray,
-        'is-finite': isFinite,
-        'is-empty': isEmpty,
-        'typeof': (value: any) => typeof value,
+    matches(text: string, pattern: string|RegExp, flags?: string) {
+        return new RegExp(pattern, flags).test(text);
+    },
 
-        matches(text: string, pattern: string|RegExp, flags?: string) {
-            return new RegExp(pattern, flags).test(text);
-        },
+    'time-since': (value: any) => {
+        if (value instanceof Date) {
+            return Date.now() - value.getTime();
+        }
 
-        'time-since': (value: any) => {
-            if (value instanceof Date) {
-                return Date.now() - value.getTime();
-            }
+        const typeStr = typeof value;
+        if (typeStr === 'string') {
+            return Date.now() - new Date(value).getTime();
+        }
 
-            const typeStr = typeof value;
-            if (typeStr === 'string') {
-                return Date.now() - new Date(value).getTime();
-            }
+        if (typeStr === 'number') {
+            return Date.now() - value;
+        }
 
-            if (typeStr === 'number') {
-                return Date.now() - value;
-            }
+        const typeMsg = value === null       ? 'null' :
+                        typeStr === 'object' ? value.constructor.name :
+                        typeStr;
+        throw new TypeError(`value is not a Date object but ${typeMsg}`);
+    },
 
-            const typeMsg = value === null       ? 'null' :
-                            typeStr === 'object' ? value.constructor.name :
-                            typeStr;
-            throw new TypeError(`value is not a Date object but ${typeMsg}`);
-        },
+    combinations(...lists: readonly any[][]): any[][] {
+        const combinations: any[][] = [];
+        const listCount = lists.length;
+        const stack: number[] = new Array(listCount);
+        const item: any[] = new Array(listCount);
+        let stackPtr = 0;
 
-        combinations(...lists: readonly any[][]): any[][] {
-            const combinations: any[][] = [];
-            const listCount = lists.length;
-            const stack: number[] = new Array(listCount);
-            const item: any[] = new Array(listCount);
-            let stackPtr = 0;
+        stack[0] = 0;
+        while (stackPtr >= 0) {
+            if (stackPtr === listCount) {
+                combinations.push([...item]);
+                -- stackPtr;
+            } else {
+                const list  = lists[stackPtr];
+                const index = stack[stackPtr];
 
-            stack[0] = 0;
-            while (stackPtr >= 0) {
-                if (stackPtr === listCount) {
-                    combinations.push([...item]);
+                if (index === list.length) {
                     -- stackPtr;
                 } else {
-                    const list  = lists[stackPtr];
-                    const index = stack[stackPtr];
+                    item[stackPtr] = list[index];
+                    stack[stackPtr] = index + 1;
+                    ++ stackPtr;
+                    stack[stackPtr] = 0;
+                }
+            }
+        }
 
-                    if (index === list.length) {
-                        -- stackPtr;
-                    } else {
-                        item[stackPtr] = list[index];
-                        stack[stackPtr] = index + 1;
-                        ++ stackPtr;
-                        stack[stackPtr] = 0;
-                    }
+        return combinations;
+    },
+
+    zip(...lists: readonly any[][]): any[][] {
+        const zipped: any[][] = [];
+        const listCount = lists.length;
+
+        if (listCount > 0) {
+            let itemCount = Infinity;
+            for (const list of lists) {
+                if (list.length < itemCount) {
+                    itemCount = list.length;
                 }
             }
 
-            return combinations;
-        },
-
-        zip(...lists: readonly any[][]): any[][] {
-            const zipped: any[][] = [];
-            const listCount = lists.length;
-
-            if (listCount > 0) {
-                let itemCount = Infinity;
-                for (const list of lists) {
-                    if (list.length < itemCount) {
-                        itemCount = list.length;
-                    }
+            for (let listIndex = 0; listIndex < itemCount; ++ listIndex) {
+                const item = new Array(listCount);
+                for (let tupleIndex = 0; tupleIndex < listCount; ++ tupleIndex) {
+                    item[tupleIndex] = lists[tupleIndex][listIndex];
                 }
-
-                for (let listIndex = 0; listIndex < itemCount; ++ listIndex) {
-                    const item = new Array(listCount);
-                    for (let tupleIndex = 0; tupleIndex < listCount; ++ tupleIndex) {
-                        item[tupleIndex] = lists[tupleIndex][listIndex];
-                    }
-                    zipped.push(item);
-                }
+                zipped.push(item);
             }
+        }
 
-            return zipped;
-        },
+        return zipped;
+    },
 
-        E:       () => Math.E,
-        LN10:    () => Math.LN10,
-        LN2:     () => Math.LN2,
-        LOG2E:   () => Math.LOG2E,
-        LOG10E:  () => Math.LOG10E,
-        PI:      () => Math.PI,
-        SQRT1_2: () => Math.SQRT1_2,
-        SQRT2:   () => Math.SQRT2,
+    E:       () => Math.E,
+    LN10:    () => Math.LN10,
+    LN2:     () => Math.LN2,
+    LOG2E:   () => Math.LOG2E,
+    LOG10E:  () => Math.LOG10E,
+    PI:      () => Math.PI,
+    SQRT1_2: () => Math.SQRT1_2,
+    SQRT2:   () => Math.SQRT2,
 
-        abs:       Math.abs,
-        acos:      Math.acos,
-        asin:      Math.asin,
-        atan:      Math.atan,
-        atan2:     Math.atan2,
-        ceil:      Math.ceil,
-        cos:       Math.cos,
-        exp:       Math.exp,
-        floor:     Math.floor,
-        logarthim: Math.log, // log() is console.log()
-        pow:       Math.pow,
-        round:     Math.round,
-        sin:       Math.sin,
-        sqrt:      Math.sqrt,
-        tan:       Math.tan,
-    }
-}
-console.log(`function (arg) {\n    ${compileToString(rules as any, options)[0].replace(/\n/g, '\n    ')}\n}`);
-
-console.log(compileToFunction(logic)({
-    foo: 1,
-    bar: {
-        x: 2,
-        y: 3
-    }
-}));
+    abs:       Math.abs,
+    acos:      Math.acos,
+    asin:      Math.asin,
+    atan:      Math.atan,
+    atan2:     Math.atan2,
+    ceil:      Math.ceil,
+    cos:       Math.cos,
+    exp:       Math.exp,
+    floor:     Math.floor,
+    logarthim: Math.log, // log() is console.log()
+    pow:       Math.pow,
+    round:     Math.round,
+    sin:       Math.sin,
+    sqrt:      Math.sqrt,
+    tan:       Math.tan,
+};
