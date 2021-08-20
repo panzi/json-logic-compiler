@@ -14,7 +14,7 @@ expect.extend({
         let pass = true;
         try {
             expect(received).toEqual(expected);
-        } catch (e) {
+        } catch (error) {
             pass = false;
         }
         return {
@@ -115,17 +115,47 @@ describe('basic', () => {
             console.log = log;
         }
     });
+
+    it("edge cases", () => {
+        expect(compileToFunction(undefined)()).toEqualMessage(undefined, `Called with undefined`);
+        expect(compileToFunction({var: ''})(0)).toEqualMessage(0, "Var when data is 'falsy'");
+        expect(compileToFunction({var: ''})(null)).toEqualMessage(null, "Var when data is null");
+        expect(compileToFunction({var: ''})(undefined)).toEqualMessage(undefined, "Var when data is undefined");
+        expect(compileToFunction({var: ['a', 'fallback']})(undefined)).toEqualMessage('fallback', "Fallback works when data is a non-object");
+    });
+
+    it("Expanding functionality with custom operations", () => {
+        expect(() => {
+            compileToFunction({"add_to_a": []} as any);
+        }).toThrow(/Unrecognized operation/)
+
+
+  
+        // Set up some outside data, and build a basic function operator
+        let a = 0;
+        const operations: Operations = {
+            add_to_a(b: any) {
+                if (b === undefined) {
+                    b = 1;
+                }
+                return a += b;
+            }
+        };
+
+      // New operation executes, returns desired result
+      // No args
+      expect(compileToFunction({"add_to_a": []} as any, { operations })()).toEqual(1);
+
+      // Unary syntactic sugar
+      expect(compileToFunction({"add_to_a": 41} as any, { operations })()).toEqual(42);
+
+      // New operation had side effects.
+      expect(a).toEqual(42);
+
+      // TODO: I didn't implement operations like that!
+    });
   
     /* TODO: port tests
-    QUnit.test( "edge cases", function( assert ) {
-      assert.equal( jsonLogic.apply(), undefined, "Called with no arguments" );
-  
-      assert.equal( jsonLogic.apply({ var: "" }, 0), 0, "Var when data is 'falsy'" );
-      assert.equal( jsonLogic.apply({ var: "" }, null), null, "Var when data is null" );
-      assert.equal( jsonLogic.apply({ var: "" }, undefined), undefined, "Var when data is undefined" );
-  
-      assert.equal( jsonLogic.apply({ var: ["a", "fallback"] }, undefined), "fallback", "Fallback works when data is a non-object" );
-    });
   
     QUnit.test( "Expanding functionality with add_operator", function( assert) {
       // Operator is not yet defined
