@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import * as fs from 'fs';
 import * as path from 'path';
-import { compileStringToFunction, compileToString } from '../src';
+import { compileStringToFunction, compileToString, Operations } from '../src';
 
 declare module "expect/build/types" {
     interface Matchers<R> {
@@ -57,11 +57,34 @@ describe('tests', () => {
     groupedTests.forEach(group => {
         it(group.name, () => {
             for (const [rule, data, expectedResult] of group.tests) {
-                const [code, ops] = compileToString(rule);
-                const func = compileStringToFunction(code, ops);
-                const result = func(data);
+                let code: string;
+                let ops: Operations;
+                let func: (arg: any) => any;
+                let result: any;
+
+                try {
+                    [code, ops] = compileToString(rule);
+                } catch (error) {
+                    throw new Error(
+                        `     error: ${error}\n` +
+                        `      rule: ${JSON.stringify(rule)}\n` +
+                        `      data: ${JSON.stringify(data)}`);
+                }
+
+                try {
+                    func = compileStringToFunction(code, ops);
+                    result = func(data);
+                } catch (error) {
+                    throw new Error(
+                        `     error: ${error}\n` +
+                        `      rule: ${JSON.stringify(rule)}\n` +
+                        `      data: ${JSON.stringify(data)}\n` +
+                        `      code: ${code.replace(/\n/g, '\n            ')}`);
+                }
+
                 expect(result).toEqualMessage(
                     expectedResult,
+                    `     error: Wrong result\n` +
                     `      rule: ${JSON.stringify(rule)}\n` +
                     `      data: ${JSON.stringify(data)}\n` +
                     `      code: ${code.replace(/\n/g, '\n            ')}\n` +

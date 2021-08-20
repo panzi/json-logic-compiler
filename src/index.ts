@@ -227,11 +227,11 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 } else if (!isPrimitive(prop)) {
                     throw new Error(`illegal var key: ${JSON.stringify(prop)}`);
                 } else {
-                    buffer.push(varName);
                     if (typeof prop === 'number') {
-                        buffer.push('?.[', JSON.stringify(prop), ']');
+                        buffer.push('(', varName, '?.[', JSON.stringify(prop), ']');
                     } else {
                         const path = String(prop).split('.');
+                        buffer.push('(', varName);
                         for (let index = 0; index < path.length; ++ index) {
                             const prop = path[index];
                             if (isSafeName(prop) && !KEYWORDS.has(prop)) {
@@ -240,12 +240,11 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                                 buffer.push('?.[', JSON.stringify(prop), ']');
                             }
                         }
-
-                        if (defaultValue !== undefined) {
-                            buffer.push(' ?? ');
-                            compile(defaultValue, varName);
-                        }
                     }
+
+                    buffer.push(' ?? ');
+                    compile(defaultValue ?? null, varName);
+                    buffer.push(')');
                 }
                 break;
 
@@ -254,7 +253,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 buffer.push('Object.keys([');
                 commaList(args, varName);
                 buffer.push(
-                    '].reduce((accumulator, key) => { if (!hasOwnProperty.call(',
+                    '].reduce((accumulator, key) => { if (!',
+                    varName,
+                    ' || !hasOwnProperty.call(',
                     varName,
                     ', key)) { accumulator[key] = true; } return accumulator; }, {}))');
                 break;
@@ -274,14 +275,12 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             case '?:':
                 if (args.length === 0) {
                     buffer.push('null');
+                } else if (args.length === 1) {
+                    compile(args[0], varName);
                 } else {
                     buffer.push('(');
-                    for (let index = 0; index < args.length;) {
-                        if (index + 1 >= args.length) {
-                            buffer.push('null');
-                            break;
-                        }
-                        compileBool(args[index ++], varName);
+                    compileBool(args[0], varName);
+                    for (let index = 1; index < args.length;) {
                         buffer.push(' ? ');
                         compile(args[index ++], varName);
                         buffer.push(' : ');
@@ -330,6 +329,11 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     let count = 0;
                     for (let index = 0; index < args.length - 1; ++ index) {
                         if (mayNeedTruthy(args[index])) {
+                            if (key === 'or') {
+                                needOr = true;
+                            } else {
+                                needAnd = true;
+                            }
                             count ++;
                             buffer.push(key, '(');
                             compile(args[index], varName);
@@ -527,14 +531,27 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'merge':
-                if (args.length === 0) {
-                    buffer.push('[]');
+                if (args.every(item => Array.isArray(item))) {
+                    buffer.push('[');
+                    let first = true;
+                    for (const array of args) {
+                        for (const item of array) {
+                            if (first) {
+                                first = false;
+                            } else {
+                                buffer.push(', ');
+                            }
+                        }
+                    }
+                    buffer.push(']');
                 } else {
-                    buffer.push('(');
-                    compile(args[0], varName);
-                    buffer.push(arrayMethod(args[0], 'concat'), '(');
-                    commaList(args.slice(1), varName);
-                    buffer.push(') ?? [])');
+                    buffer.push('[');
+                    commaList(args, varName);
+                    buffer.push(']');
+
+                    if (!args.every(isNotArray)) {
+                        buffer.push('.reduce((accumulator, item) => { if (Array.isArray(item)) { accumulator.push(...item); } else { accumulator.push(item); } return accumulator; }, [])');
+                    }
                 }
                 break;
 
@@ -643,6 +660,9 @@ function substr(source, start, end) {
 const hasOwnProperty = Object.hasOwnProperty;
 
 function missing_some(obj, count, keys) {
+    if (!obj) {
+        return keys;
+    }
     var missingMap = {};
     for (var index = 0; index < keys.length; ++ index) {
         var key = keys[index];
@@ -651,7 +671,7 @@ function missing_some(obj, count, keys) {
         }
     }
     var missing = Object.keys(missingMap);
-    return missing.length >= count ? missing : [];
+    return missing.length > count ? missing : [];
 }
 
 function resolve(obj, prop, defaultValue) {
@@ -813,6 +833,49 @@ function arrayMethod(arg: RulesLogic, method: string): string {
     }
 
     return `?.${method}?.`;
+}
+
+function isNotArray(logic: RulesLogic): boolean {
+    if (Array.isArray(logic)) {
+        return false;
+    }
+
+    if (isPrimitive(logic)) {
+        return true;
+    }
+
+    const key = getOp(logic);
+
+    if (key === null) {
+        return false;
+    }
+
+    switch (key) {
+        case '<':
+        case '>':
+        case '<=':
+        case '>=':
+        case '==':
+        case '!=':
+        case '===':
+        case '!==':
+        case '!':
+        case '!!':
+        case '+':
+        case '-':
+        case '*':
+        case '/':
+        case '%':
+        case 'in':
+        case 'cat':
+        case 'substr':
+        case 'some':
+        case 'all':
+        case 'none':
+            return true;
+    }
+
+    return false;
 }
 
 function isArray(logic: RulesLogic): boolean {
