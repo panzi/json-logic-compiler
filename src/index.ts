@@ -88,7 +88,7 @@ const RESERVED_NAMES = new Set<string>([
     'resolve', 'truthy',
     'hasOwnProperty', 'String', 'Array', 'Object', 'Math', 'console',
 
-    // log, substr, missing, and missing_some aren't here, because they are operators that are allowed to be overlaoded.
+    // all, and, or, log, substr, missing, and missing_some aren't here, because they are operators that are allowed to be overlaoded.
 ]);
 
 function isSafeName(name: string): boolean {
@@ -107,6 +107,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
     let needTruthy = false;
     let needHasOwnProperty = false;
     let needsMissingSome = false;
+    let needAnd = false;
+    let needOr = false;
+    let needAll = false;
 
     function commaList(logic: RulesLogic[], varName: string) {
         if (logic.length > 0) {
@@ -126,6 +129,16 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
             buffer.push(')');
         } else {
             compile(logic, varName);
+        }
+    }
+
+    function compileArray(logic: RulesLogic, varName: string) {
+        if (isArray(logic)) {
+            compile(logic, varName);
+        } else {
+            buffer.push('(');
+            compile(logic, varName);
+            buffer.push(' ?? [])');
         }
     }
 
@@ -306,20 +319,31 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 compileBool(args[0], varName);
                 break;
 
-            case 'or':
             case 'and':
+            case 'or':
                 if (args.length === 0) {
                     buffer.push('undefined');
-                    return;
+                } else if (args.length === 1) {
+                    compile(args[0], varName);
+                } else {
+                    const op = key == 'or' ? ' || ' : ' && ';
+                    let count = 0;
+                    for (let index = 0; index < args.length - 1; ++ index) {
+                        if (mayNeedTruthy(args[index])) {
+                            count ++;
+                            buffer.push(key, '(');
+                            compile(args[index], varName);
+                            buffer.push(', ');
+                        } else {
+                            compile(args[index], varName);
+                            buffer.push(op);
+                        }
+                    }
+                    compile(args[args.length - 1], varName);
+                    for (let index = 0; index < count; ++ index) {
+                        buffer.push(')');
+                    }
                 }
-                const op = key == 'or' ? ' || ' : ' && ';
-                buffer.push('(');
-                compileBool(args[0], varName);
-                for (let index = 1; index < args.length; ++ index) {
-                    buffer.push(op);
-                    compileBool(args[index], varName);
-                }
-                buffer.push(')');
                 break;
 
             case '>':
@@ -426,21 +450,19 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                buffer.push('(');
-                compile(args[0], varName);
-                buffer.push(arrayMethod(args[0], 'map'), '(item => ');
+                compileArray(args[0], varName);
+                buffer.push('.map(item => ');
                 compile(args[1], 'item');
-                buffer.push(') ?? [])');
+                buffer.push(')');
                 break;
 
             case 'reduce':
                 if (args.length < 2 || args.length > 3) {
                     throw new TypeError(`illegal logic expression, ${key} needs 2 to 3 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                compile(args[0], varName);
-                buffer.push(
-                    arrayMethod(args[0], 'reduce'),
-                    '((accumulator, current, index, data) => { var context = { accumulator, current, index, data }; return ');
+
+                compileArray(args[0], varName);
+                buffer.push('.reduce((accumulator, current, index, data) => { var context = { accumulator, current, index, data }; return ');
                 compile(args[1], 'context');
                 buffer.push('; }');
                 if (args.length > 2) {
@@ -454,21 +476,33 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                buffer.push('(');
-                compile(args[0], varName);
-                buffer.push(arrayMethod(args[0], 'filter'), '(item => ');
+                compileArray(args[0], varName);
+                buffer.push('.filter(item => ');
                 compileBool(args[1], 'item');
-                buffer.push(') ?? [])');
+                buffer.push(')');
                 break;
 
             case 'all':
                 if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                compile(args[0], varName);
-                buffer.push(arrayMethod(args[0], 'every'), '(item => ');
-                compileBool(args[1], 'item');
-                buffer.push(')');
+                if (Array.isArray(args[0])) {
+                    if (args[0].length === 0) {
+                        buffer.push('false');
+                    } else {
+                        compile(args[0], varName);
+                        buffer.push('.every(item => ');
+                        compileBool(args[1], 'item');
+                        buffer.push(')');
+                    }
+                } else {
+                    needAll = true;
+                    buffer.push('all(');
+                    compileArray(args[0], varName);
+                    buffer.push(', item => ');
+                    compileBool(args[1], 'item');
+                    buffer.push(')');
+                }
                 break;
 
             case 'none':
@@ -476,8 +510,8 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
                 buffer.push('!');
-                compile(args[0], varName);
-                buffer.push(arrayMethod(args[0], 'every'), '(item => ');
+                compileArray(args[0], varName);
+                buffer.push('.some(item => ');
                 compileBool(args[1], 'item');
                 buffer.push(')');
                 break;
@@ -486,8 +520,8 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                compile(args[0], varName);
-                buffer.push(arrayMethod(args[0], 'some'), '(item => ');
+                compileArray(args[0], varName);
+                buffer.push('.some(item => ');
                 compileBool(args[1], 'item');
                 buffer.push(')')
                 break;
@@ -508,8 +542,8 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length !== 2) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                compile(args[1], varName);
-                buffer.push(arrayMethod(args[1], 'includes'), '(');
+                compileArray(args[1], varName);
+                buffer.push('.includes(');
                 compile(args[0], varName);
                 buffer.push(')');
                 break;
@@ -569,7 +603,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
         buffer.unshift(String(substr) + '\n')
     }
 
-    if (needTruthy) {
+    if (needTruthy || needAnd || needOr) {
         buffer.unshift('function truthy(value) { return Array.isArray(value) ? value.length !== 0 : !!value; }\n')
     }
 
@@ -579,6 +613,19 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
 
     if (needHasOwnProperty || needsMissingSome) {
         buffer.unshift('const hasOwnProperty = Object.hasOwnProperty;\n');
+    }
+
+    if (needAnd) {
+        buffer.unshift('function and(a, b) { return truthy(a) ? b : a; }\n');
+    }
+
+    if (needOr) {
+        buffer.unshift('function or(a, b) { return truthy(a) ? a : b; }\n');
+    }
+
+    if (needAll) {
+        // yes, they really do it the wrong way around for empty arrays!!!
+        buffer.unshift('function all(items, func) { return items.length === 0 ? false : items.every(func); }\n');
     }
 
     return [buffer.join(''), usedOperations];
@@ -671,9 +718,7 @@ function isEmpty(ops: {[key: string]: any}): boolean {
     return true;
 }
 
-export function compileToFunction(logic: RulesLogic, options?: Options): (arg: any) => any {
-    const [code, usedOperations] = compileToString(logic, options);
-
+export function compileStringToFunction(code: string, usedOperations: Operations): (arg: any) => any {
     if (isEmpty(usedOperations)) {
         return new Function('arg', code) as any;
     }
@@ -689,6 +734,11 @@ export function compileToFunction(logic: RulesLogic, options?: Options): (arg: a
 
     const wrapper = new Function(...argNames, wrappedCode);
     return wrapper(...args);
+}
+
+export function compileToFunction(logic: RulesLogic, options?: Options): (arg: any) => any {
+    const [code, usedOperations] = compileToString(logic, options);
+    return compileStringToFunction(code, usedOperations);
 }
 
 function mayNeedTruthy(logic: RulesLogic): boolean {
