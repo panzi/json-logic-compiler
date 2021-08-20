@@ -84,7 +84,7 @@ const KEYWORDS = new Set<string>([
 
 const RESERVED_NAMES = new Set<string>([
     ...KEYWORDS,
-    'arg', 'item', 'accumulator', 'context', 'key', 'current', 'data', 'index',
+    'arg', 'item', 'accumulator', 'context', 'key', 'current', 'data', 'index', 'merge',
     'resolve', 'truthy',
     'hasOwnProperty', 'String', 'Array', 'Object', 'Math', 'console',
 
@@ -101,15 +101,16 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
     const usedOperations: Operations = Object.create(null);
     const safeNames: {[name: string]: string} = Object.create(null);
     let unsafeNameCount = 0;
-    let needResolve = false;
-    let needLog = false;
-    let needSubstr = false;
-    let needTruthy = false;
-    let needHasOwnProperty = false;
+    let needsResolve = false;
+    let needsLog = false;
+    let needsSubstr = false;
+    let needsTruthy = false;
+    let needsMissing = false;
     let needsMissingSome = false;
-    let needAnd = false;
-    let needOr = false;
-    let needAll = false;
+    let needsAnd = false;
+    let needsOr = false;
+    let needsAll = false;
+    let needsMerge = false;
 
     function commaList(logic: RulesLogic[], varName: string) {
         if (logic.length > 0) {
@@ -123,7 +124,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
 
     function compileBool(logic: RulesLogic, varName: string) {
         if (mayNeedTruthy(logic)) {
-            needTruthy = true;
+            needsTruthy = true;
             buffer.push('truthy(');
             compile(logic, varName);
             buffer.push(')');
@@ -208,13 +209,13 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
 
         switch (key) {
             case 'var':
-                const prop: RulesLogic|undefined = args[0];
-                const defaultValue: RulesLogic|undefined = args[1];
+                const prop: RulesLogic = args[0];
+                const defaultValue: RulesLogic = args[1];
 
                 if (prop === undefined || prop === null || prop === '') {
                     buffer.push(varName);
                 } else if (isLogic(prop)) {
-                    needResolve = true;
+                    needsResolve = true;
                     buffer.push('resolve(', varName, ', ');
                     compile(prop as RulesLogic, varName);
                     buffer.push(', ');
@@ -225,7 +226,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     }
                     buffer.push(')');
                 } else if (!isPrimitive(prop)) {
-                    throw new Error(`illegal var key: ${JSON.stringify(prop)}`);
+                    throw new Error(`illegal var: ${JSON.stringify(prop)}`);
                 } else {
                     if (typeof prop === 'number') {
                         buffer.push('(', varName, '?.[', JSON.stringify(prop), ']');
@@ -249,15 +250,14 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 break;
 
             case 'missing':
-                needHasOwnProperty = true;
-                buffer.push('Object.keys([');
-                commaList(args, varName);
-                buffer.push(
-                    '].reduce((accumulator, key) => { if (!',
-                    varName,
-                    ' || !hasOwnProperty.call(',
-                    varName,
-                    ', key)) { accumulator[key] = true; } return accumulator; }, {}))');
+                needsMissing = true;
+                buffer.push('missing(', varName, ', ');
+                if (args.length === 1) {
+                    compile(args[0], varName);
+                } else {
+                    compile(args, varName);
+                }
+                buffer.push(')');
                 break;
 
             case 'missing_some':
@@ -330,9 +330,9 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     for (let index = 0; index < args.length - 1; ++ index) {
                         if (mayNeedTruthy(args[index])) {
                             if (key === 'or') {
-                                needOr = true;
+                                needsOr = true;
                             } else {
-                                needAnd = true;
+                                needsAnd = true;
                             }
                             count ++;
                             buffer.push(key, '(');
@@ -500,7 +500,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                         buffer.push(')');
                     }
                 } else {
-                    needAll = true;
+                    needsAll = true;
                     buffer.push('all(');
                     compileArray(args[0], varName);
                     buffer.push(', item => ');
@@ -541,6 +541,7 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                             } else {
                                 buffer.push(', ');
                             }
+                            compile(item, varName);
                         }
                     }
                     buffer.push(']');
@@ -550,7 +551,8 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                     buffer.push(']');
 
                     if (!args.every(isNotArray)) {
-                        buffer.push('.reduce((accumulator, item) => { if (Array.isArray(item)) { accumulator.push(...item); } else { accumulator.push(item); } return accumulator; }, [])');
+                        needsMerge = true;
+                        buffer.push('.reduce(merge, [])');
                     }
                 }
                 break;
@@ -583,14 +585,14 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
                 if (args.length < 2 || args.length > 3) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 2 arguments: ${JSON.stringify(logic, null, 4)}`);
                 }
-                needSubstr = true;
+                needsSubstr = true;
                 buffer.push('substr(');
                 commaList(args, varName);
                 buffer.push(')');
                 break;
 
             case 'log':
-                needLog = true;
+                needsLog = true;
                 buffer.push('log(');
                 if (args.length !== 1) {
                     throw new TypeError(`illegal logic expression, ${key} needs exactly 1 argument: ${JSON.stringify(logic, null, 4)}`);
@@ -608,19 +610,19 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
 
     buffer.push(';');
 
-    if (needLog) {
+    if (needsLog) {
         buffer.unshift('function log(value) { console.log(value); return value; }\n');
     }
 
-    if (needResolve) {
+    if (needsResolve || needsMissing || needsMissingSome) {
         buffer.unshift(String(resolve) + '\n');
     }
 
-    if (needSubstr) {
+    if (needsSubstr) {
         buffer.unshift(String(substr) + '\n')
     }
 
-    if (needTruthy || needAnd || needOr) {
+    if (needsTruthy || needsAnd || needsOr) {
         buffer.unshift('function truthy(value) { return Array.isArray(value) ? value.length !== 0 : !!value; }\n')
     }
 
@@ -628,21 +630,33 @@ export function compileToString(logic: RulesLogic, options?: Options): [string, 
         buffer.unshift(String(missing_some) + '\n');
     }
 
-    if (needHasOwnProperty || needsMissingSome) {
-        buffer.unshift('const hasOwnProperty = Object.hasOwnProperty;\n');
+    if (needsMissing || needsMissingSome) {
+        buffer.unshift(String(missing) + '\n');
     }
 
-    if (needAnd) {
+    if (needsAnd) {
         buffer.unshift('function and(a, b) { return truthy(a) ? b : a; }\n');
     }
 
-    if (needOr) {
+    if (needsOr) {
         buffer.unshift('function or(a, b) { return truthy(a) ? a : b; }\n');
     }
 
-    if (needAll) {
+    if (needsAll) {
         // yes, they really do it the wrong way around for empty arrays!!!
         buffer.unshift('function all(items, func) { return items.length === 0 ? false : items.every(func); }\n');
+    }
+
+    if (needsMerge) {
+        buffer.unshift(
+            'function merge(accumulator, item) {\n' +
+            '    if (Array.isArray(item)) {\n' +
+            '        accumulator.push(...item);\n' +
+            '    } else {\n' +
+            '        accumulator.push(item);\n' +
+            '    }\n' +
+            '    return accumulator;\n' +
+            '}\n');
     }
 
     return [buffer.join(''), usedOperations];
@@ -657,21 +671,29 @@ function substr(source, start, end) {
     return String(source).substr(start, end);
 }
 
-const hasOwnProperty = Object.hasOwnProperty;
+function missing(obj, keys) {
+    if (!Array.isArray(keys)) {
+        keys = [keys];
+    }
 
-function missing_some(obj, count, keys) {
     if (!obj) {
         return keys;
     }
-    var missingMap = {};
-    for (var index = 0; index < keys.length; ++ index) {
-        var key = keys[index];
-        if (!hasOwnProperty.call(obj, key)) {
-            missingMap[key] = true;
+
+    const missing: any[] = [];
+    for (const key of keys) {
+        const value = resolve(obj, key, null);
+        if (value === null || value === '') {
+            missing.push(key);
         }
     }
-    var missing = Object.keys(missingMap);
-    return missing.length > count ? missing : [];
+
+    return missing;
+}
+
+function missing_some(obj, required, keys) {
+    const actualMissing = missing(obj, keys);
+    return keys.length - actualMissing.length >= required ? [] : actualMissing;
 }
 
 function resolve(obj, prop, defaultValue) {
